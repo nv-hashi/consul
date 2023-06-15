@@ -483,6 +483,8 @@ test-compat-integ-setup: dev-docker
 	@docker run --rm -t $(CONSUL_COMPAT_TEST_IMAGE):local consul version
 	@#  'consul-envoy:target-version' is needed by compatibility integ test
 	@docker build -t consul-envoy:target-version --build-arg CONSUL_IMAGE=$(CONSUL_COMPAT_TEST_IMAGE):local --build-arg ENVOY_VERSION=${ENVOY_VERSION} -f ./test/integration/consul-container/assets/Dockerfile-consul-envoy ./test/integration/consul-container/assets
+	@# 'wasm:local' is needed by the envoy extension tests for wasm
+	@docker build -t wasm:local ./test/integration/consul-container/test/envoy_extensions/testdata/wasm_test_files/
 
 .PHONY: test-metrics-integ
 test-metrics-integ: test-compat-integ-setup

@@ -286,6 +286,9 @@ jobs:
       - uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
         with:
           go-version-file: 'go.mod'
+      - uses: acifani/setup-tinygo@v1
+        with:
+          tinygo-version: '0.28.1'
 
       - name: fetch binary
         uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
@@ -300,6 +303,10 @@ jobs:
 
       - name: Docker build
         run: docker build -t consul:local -f ./build-support/docker/Consul-Dev.dockerfile ./bin
+
+      # used in envoy extension wasm test
+      - name: Compile wasm
+        run: (cd ./test/integration/consul-container/test/envoy_extensions/testdata/wasm_test_files/ && tinygo build -o ./wasm_add_header.wasm -scheduler=none -target=wasi ./wasm_add_header.go)
 
       - name: Envoy Integration Tests
         env:
@@ -366,6 +373,10 @@ jobs:
       ENVOY_VERSION: "1.25.4"
     steps:
       - uses: actions/checkout@8e5e7e5ab8b370d6c329ec480221332ada57f0ab # v3.5.2
+      - uses: acifani/setup-tinygo@v1
+        with:
+          tinygo-version: '0.28.1'
+
       # NOTE: This step is specifically needed for ENT. It allows us to access the required private HashiCorp repos.
       - name: Setup Git
         if: ${{ endsWith(github.repository, '-enterprise') }}
@@ -385,6 +396,10 @@ jobs:
           path: .
       - name: restore mode+x
         run: chmod +x consul
+
+      - name: Compile wasm
+        run: (cd ./test/integration/consul-container/test/envoy_extensions/testdata/wasm_test_files/ && tinygo build -o ./wasm_add_header.wasm -scheduler=none -target=wasi ./wasm_add_header.go)
+
       # Build the consul:local image from the already built binary
       - name: Build consul:local image
         run: docker build -t ${{ env.CONSUL_LATEST_IMAGE_NAME }}:local -f ./build-support/docker/Consul-Dev.dockerfile .

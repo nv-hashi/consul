@@ -68,3 +68,7 @@ override.tf.json
 terraform.rc
 /go.work
 /go.work.sum
+
+# Ignore integration test artifacts
+**/testdata/wasm_test_files/wasm_add_header.go.wasm
+**/testdata/wasm_test_files/wasm_add_header.go.wasm.lock
