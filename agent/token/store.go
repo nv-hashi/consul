@@ -212,7 +212,7 @@ func (t *Store) UpdateConfigFileRegistrationToken(token string, source TokenSour
 		&t.configFileRegistrationTokenSource, TokenKindConfigFileRegistration)
 }
 
-// UpdateDNSToken replaces the current DNS token in the the store.
+// UpdateDNSToken replaces the current DNS token in the store.
 // Returns true if it was changed.
 func (t *Store) UpdateDNSToken(token string, source TokenSource) bool {
 	return t.updateToken(token, source, &t.dnsToken, &t.dnsTokenSource, TokenKindDNS)

@@ -99,14 +99,14 @@ func TestStore_RegularTokens(t *testing.T) {
 		},
 		{
 			name:      "set dns - config",
-			set:       tokens{dns: "D", registrationSource: TokenSourceConfig},
-			raw:       tokens{dns: "D", registrationSource: TokenSourceConfig},
+			set:       tokens{dns: "D", dnsSource: TokenSourceConfig},
+			raw:       tokens{dns: "D", dnsSource: TokenSourceConfig},
 			effective: tokens{dns: "D"},
 		},
 		{
 			name:      "set dns - api",
-			set:       tokens{dns: "D", registrationSource: TokenSourceAPI},
-			raw:       tokens{dns: "D", registrationSource: TokenSourceAPI},
+			set:       tokens{dns: "D", dnsSource: TokenSourceAPI},
+			raw:       tokens{dns: "D", dnsSource: TokenSourceAPI},
 			effective: tokens{dns: "D"},
 		},
 		{
@@ -316,8 +316,8 @@ func TestStore_Notify(t *testing.T) {
 	requireNotNotified(t, replicationNotifier.Ch)
 	requireNotNotified(t, agentRecoveryNotifier.Ch)
 	requireNotNotified(t, replicationNotifier2.Ch)
-	requireNotifiedOnce(t, registrationNotifier.Ch)
-	requireNotNotified(t, dnsNotifier.Ch)
+	requireNotNotified(t, registrationNotifier.Ch)
+	requireNotifiedOnce(t, dnsNotifier.Ch)
 
 	// request updates that are not changes
 	require.False(t, s.UpdateAgentToken("5d748ec2-d536-461f-8e2a-1f7eae98d559", TokenSourceAPI))
