@@ -153,7 +153,7 @@ func loadTokens(s *Store, cfg Config, tokens persistedTokens, logger Logger) {
 			logger.Warn("\"dns\" token present in both the configuration and persisted token store, using the persisted token")
 		}
 	} else {
-		s.UpdateConfigFileRegistrationToken(cfg.ACLDNSToken, TokenSourceConfig)
+		s.UpdateDNSToken(cfg.ACLDNSToken, TokenSourceConfig)
 	}
 
 	loadEnterpriseTokens(s, cfg)

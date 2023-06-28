@@ -42,21 +42,21 @@ func TestStore_Load(t *testing.T) {
 	t.Run("updated from Config", func(t *testing.T) {
 		cfg := Config{
 			DataDir:                        dataDir,
-			ACLDefaultToken:                "echo",
-			ACLAgentToken:                  "foxtrot",
-			ACLAgentRecoveryToken:          "golf",
-			ACLReplicationToken:            "hotel",
-			ACLConfigFileRegistrationToken: "india",
-			ACLDNSToken:                    "juliet",
+			ACLDefaultToken:                "sierra",
+			ACLAgentToken:                  "tango",
+			ACLAgentRecoveryToken:          "uniform",
+			ACLReplicationToken:            "victor",
+			ACLConfigFileRegistrationToken: "xray",
+			ACLDNSToken:                    "zulu",
 		}
 		// ensures no error for missing persisted tokens file
 		require.NoError(t, store.Load(cfg, logger))
-		require.Equal(t, "echo", store.UserToken())
-		require.Equal(t, "foxtrot", store.AgentToken())
-		require.Equal(t, "golf", store.AgentRecoveryToken())
-		require.Equal(t, "hotel", store.ReplicationToken())
-		require.Equal(t, "india", store.ConfigFileRegistrationToken())
-		require.Equal(t, "juliet", store.DNSToken())
+		require.Equal(t, "sierra", store.UserToken())
+		require.Equal(t, "tango", store.AgentToken())
+		require.Equal(t, "uniform", store.AgentRecoveryToken())
+		require.Equal(t, "victor", store.ReplicationToken())
+		require.Equal(t, "xray", store.ConfigFileRegistrationToken())
+		require.Equal(t, "zulu", store.DNSToken())
 	})
 
 	t.Run("with persisted tokens", func(t *testing.T) {
@@ -172,7 +172,8 @@ func TestStore_Load(t *testing.T) {
 
 		require.Equal(t, "xray", store.AgentToken())
 		require.Equal(t, "zulu", store.AgentRecoveryToken())
-		require.Equal(t, "charlie", store.UserToken())
+
+		require.Equal(t, "alpha", store.UserToken())
 		require.Equal(t, "delta", store.ReplicationToken())
 		require.Equal(t, "echo", store.ConfigFileRegistrationToken())
 		require.Equal(t, "foxtrot", store.DNSToken())
@@ -210,8 +211,8 @@ func TestStore_Load(t *testing.T) {
 			ACLDefaultToken:                "alfa",
 			ACLAgentToken:                  "bravo",
 			ACLAgentRecoveryToken:          "charlie",
-			ACLReplicationToken:            "echo",
-			ACLConfigFileRegistrationToken: "delta",
+			ACLReplicationToken:            "delta",
+			ACLConfigFileRegistrationToken: "echo",
 			ACLDNSToken:                    "foxtrot",
 		}
 
@@ -223,9 +224,9 @@ func TestStore_Load(t *testing.T) {
 		require.Equal(t, "alfa", store.UserToken())
 		require.Equal(t, "bravo", store.AgentToken())
 		require.Equal(t, "charlie", store.AgentRecoveryToken())
-		require.Equal(t, "echo", store.ReplicationToken())
-		require.Equal(t, "foxtrot", store.ConfigFileRegistrationToken())
-		require.Equal(t, "golf", store.DNSToken())
+		require.Equal(t, "delta", store.ReplicationToken())
+		require.Equal(t, "echo", store.ConfigFileRegistrationToken())
+		require.Equal(t, "foxtrot", store.DNSToken())
 	})
 }
 
