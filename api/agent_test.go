@@ -1610,6 +1610,10 @@ func TestAPI_AgentUpdateToken(t *testing.T) {
 			t.Fatalf("err: %v", err)
 		}
 
+		if _, err := agent.UpdateDNSToken("root", nil); err != nil {
+			t.Fatalf("err: %v", err)
+		}
+
 	})
 
 	t.Run("new with fallback", func(t *testing.T) {
@@ -1697,6 +1701,9 @@ func TestAPI_AgentUpdateToken(t *testing.T) {
 		require.Error(t, err)
 
 		_, err = agent.UpdateConfigFileRegistrationToken("root", nil)
+		require.Error(t, err)
+
+		_, err = agent.UpdateDNSToken("root", nil)
 		require.Error(t, err)
 	})
 }
