@@ -141,10 +141,10 @@ Usage: consul acl set-agent-token [options] TYPE TOKEN
                                       If a service or check definition contains a 'token'
                                       field, then that token is used instead.
 	
-	dns								  This is the token that the will be used in place of the default
-									  token when specified for DNS requests and for DNS-specific RPCs.
-									  If not provided the agent will attempt to use the default token
-									  if one is present, then fallback to the anonymous token.
+	dns	                              This is the token that the will be used in place of the default
+                                      token when specified for DNS requests and for DNS-specific RPCs.
+                                      If not provided the agent will attempt to use the default token
+                                      if one is present, then fallback to the anonymous token.
 
   Example:
 

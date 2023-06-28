@@ -230,12 +230,12 @@ func TestStore_Load(t *testing.T) {
 }
 
 func TestStore_WithPersistenceLock(t *testing.T) {
-	// ACLDefaultToken:					alpha   --> sierra
-	// ACLAgentToken:					bravo   --> tango
-	// ACLAgentRecoveryToken:			charlie --> uniform
-	// ACLReplicationToken:				delta   --> victor
+	// ACLDefaultToken:                 alpha   --> sierra
+	// ACLAgentToken:                   bravo   --> tango
+	// ACLAgentRecoveryToken:           charlie --> uniform
+	// ACLReplicationToken:             delta   --> victor
 	// ACLConfigFileRegistrationToken:  echo    --> xray
-	// ACLDNSToken: 					foxtrot --> zulu
+	// ACLDNSToken:                     foxtrot --> zulu
 	setupStore := func() (string, *Store) {
 		dataDir := testutil.TempDir(t, "datadir")
 		store := new(Store)
