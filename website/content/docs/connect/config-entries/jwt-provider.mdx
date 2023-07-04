@@ -28,6 +28,18 @@ The following list outlines field hierarchy, language-specific data types, and r
     - [`RequestTimeoutMs`](#jsonwebkeyset-remote-requesttimeoutms): integer
     - [`CacheDuration`](#jsonwebkeyset-remote-cacheduration): string | `5m`
     - [`FetchAsynchronously`](#jsonwebkeyset-remote-fetchasynchronously): boolean | `false`
+    - [`JWKSCluster`](#jsonwebkeyset-remote-jwkscluster): map
+      - [`TLSCertificates`](#jsonwebkeyset-remote-jwkscluster-tlscertificates): map
+        - [`CaCertificateProviderInstance`](#jsonwebkeyset-remote-jwkscluster-tlscertificates-cacertificateproviderinstance): map
+          - [`InstanceName`](#jsonwebkeyset-remote-jwkscluster-tlscertificates-cacertificateproviderinstance): string | `default`
+          - [`CertificateName`](#jsonwebkeyset-remote-jwkscluster-tlscertificates-cacertificateproviderinstance): string
+        - [`TrustedCA`](#jsonwebkeyset-remote-jwkscluster-tlscertificates-trustedca): map
+          - [`Filename`](#jsonwebkeyset-remote-jwkscluster-tlscertificates-trustedca): string
+          - [`EnvironmentVariable`](#jsonwebkeyset-remote-jwkscluster-tlscertificates-trustedca): string
+          - [`InlineString`](#jsonwebkeyset-remote-jwkscluster-tlscertificates-trustedca): string
+          - [`InlineBytes`](#jsonwebkeyset-remote-jwkscluster-tlscertificates-trustedca): string
+      - [`DiscoveryType`](#jsonwebkeyset-remote-jwkscluster-discoverytype): string | `STRICT_DNS`
+      - [`ConnectTimeout`](#jsonwebkeyset-remote-jwkscluster-connecttimeout): string | `5s`
     - [`RetryPolicy`](#jsonwebkeyset-remote-retrypolicy): map
       - [`NumRetries`](#jsonwebkeyset-remote-retrypolicy-numretries): integer | `0`
       - [`RetryPolicyBackoff`](#jsonwebkeyset-remote-retrypolicy-retry-policy-backoff): map
@@ -75,6 +87,18 @@ The following list outlines field hierarchy, language-specific data types, and r
         - [`retryPolicyBackoff`](#spec-jsonwebkeyset-remote-retrypolicy-retry-policy-backoff): map
           - [`baseInterval`](#spec-jsonwebkeyset-remote-retrypolicy-retry-policy-backoff): string
           - [`maxInterval`](#spec-jsonwebkeyset-remote-retrypolicy-retry-policy-backoff): string
+      - [`jwksCluster`](#spec-jsonwebkeyset-remote-jwkscluster): map
+        - [`tlsCertificates`](#spec-jsonwebkeyset-remote-jwkscluster-tlscertificates): map
+          - [`caCertificateProviderInstance`](#spec-jsonwebkeyset-remote-jwkscluster-tlscertificates-cacertificateproviderinstance): map
+            - [`instanceName`](#spec-jsonwebkeyset-remote-jwkscluster-tlscertificates-cacertificateproviderinstance): string | `default`
+            - [`certificateName`](#spec-jsonwebkeyset-remote-jwkscluster-tlscertificates-cacertificateproviderinstance): string
+          - [`trustedCA`](#spec-jsonwebkeyset-remote-jwkscluster-tlscertificates-trustedca): map
+            - [`filename`](#spec-jsonwebkeyset-remote-jwkscluster-tlscertificates-trustedca): string
+            - [`environmentVariable`](#spec-jsonwebkeyset-remote-jwkscluster-tlscertificates-trustedca): string
+            - [`inlineString`](#spec-jsonwebkeyset-remote-jwkscluster-tlscertificates-trustedca): string
+            - [`inlineBytes`](#spec-jsonwebkeyset-remote-jwkscluster-tlscertificates-trustedca): string
+        - [`discoveryType`](#spec-jsonwebkeyset-remote-jwkscluster-discoverytype): string | `STRICT_DNS`
+        - [`connectTimeout`](#spec-jsonwebkeyset-remote-jwkscluster-connecttimeout): string | `5s`
   - [`audiences`](#spec-audiences): list of strings
   - [`locations`](#spec-locations): list of maps
     - [`header`](#spec-locations-header): map
@@ -126,8 +150,27 @@ JSONWebKeySet = {
               MaxInterval = "10s"
             }
           }
+          JWKSCluster = {
+            DiscoveryType = "STATIC"
+            ConnectTimeout = "10s"
+            TLSCertificates = {
+              TrustedCA = {                                # cannot specify with JWKSCluster{}.CaCertificateProviderInstance
+                Filename = "<path/to/cert/file>"           # cannot specify with JWKSCluster{}.TrustedCA.EnvironmentVariable, JWKSCluster{}.TrustedCA.InlineString or JWKSCluster{}.TrustedCA.InlineBytes
+                EnvironmentVariable = "<env-variable>"     # cannot specify with JWKSCluster{}.TrustedCA.Filename, JWKSCluster{}.TrustedCA.InlineString or JWKSCluster{}.TrustedCA.InlineBytes
+                InlineString = "<inline-string>"           # cannot specify with JWKSCluster{}.TrustedCA.Filename, JWKSCluster{}.TrustedCA.EnvironmentVariable or JWKSCluster{}.TrustedCA.InlineBytes
+                InlineBytes = "\302\000\302\302\302\302"   # cannot specify with JWKSCluster{}.TrustedCA.Filename, JWKSCluster{}.TrustedCA.InlineString or JWKSCluster{}.TrustedCA.EnvironmentVariable
+              }
+            }
+            TLSCertificates = {
+              CaCertificateProviderInstance = {      # cannot specify with JWKSCluster{}.TrustedCA
+                InstanceName = "<instance-name>"
+                CertificateName = "<certificate-name>"
+              }
+            }
+          }
         }
       }
+
 Audiences = ["<aud-claims>"]
 Locations = [
     {
@@ -184,6 +227,24 @@ CacheConfig = {
             "RetryPolicyBackOff": {
               "BaseInterval": "1s",
               "MaxInterval": "10s"
+            }
+          },
+          "JWKSCluster": {
+            "DiscoveryType": "STATIC",
+            "ConnectTimeout": "10s",
+            "TLSCertificates": {
+              "TrustedCA": {                                // cannot specify with JWKSCluster.CaCertificateProviderInstance
+                "Filename": "<path/to/cert/file>",          // cannot specify with JWKSCluster.TrustedCA.EnvironmentVariable, JWKSCluster.TrustedCA.InlineString or JWKSCluster.TrustedCA.InlineBytes
+                "EnvironmentVariable": "<env-variable>",    // cannot specify with JWKSCluster.TrustedCA.Filename, JWKSCluster.TrustedCA.InlineString or JWKSCluster.TrustedCA.InlineBytes
+                "InlineString": "<inline-string>",          // cannot specify with JWKSCluster.TrustedCA.Filename, JWKSCluster.TrustedCA.EnvironmentVariable or JWKSCluster.TrustedCA.InlineBytes
+                "InlineBytes": "\302\000\302\302\302\302"   // cannot specify with JWKSCluster.TrustedCA.Filename, JWKSCluster.TrustedCA.InlineString or JWKSCluster.TrustedCA.EnvironmentVariable
+              }
+            },
+            "TLSCertificates": {
+              "CaCertificateProviderInstance": {            // cannot specify with JWKSCluster.TrustedCA
+                "InstanceName": "<instance-name>",
+                "CertificateName": "<certificate-name>"
+              }
             }
           }
         }
@@ -246,6 +307,19 @@ spec:                                             # required
         retryPolicyBackoff:
           baseInterval: 1s
           maxInterval: 10s
+      jwksCluster:
+        discoveryType: STATIC
+        connectTimeout: 10s
+        tlsCertificates:
+          trustedCA:                                # cannot specify with spec.jwksCluster.caCertificateProviderInstance
+            filename: <path/to/cert/file>           # cannot specify with spec.jwksCluster.trustedCA.environmentVariable, spec.jwksCluster.trustedCA.inlineString or spec.jwksCluster.trustedCA.inlineBytes
+            environmentVariable: <env-variable>     # cannot specify with spec.jwksCluster.trustedCA.filename, spec.jwksCluster.trustedCA.inlineString or spec.jwksCluster.trustedCA.inlineBytes
+            inlineString: <inline-string>           # cannot specify with spec.jwksCluster.trustedCA.filename, spec.jwksCluster.trustedCA.environmentVariable or spec.jwksCluster.trustedCA.inlineBytes
+            inlineBytes: \302\000\302\302\302\302   # cannot specify with spec.jwksCluster.trustedCA.filename, spec.jwksCluster.trustedCA.inlineString or spec.jwksCluster.trustedCA.environmentVariable
+        tlsCertificates:
+          caCertificateProviderInstance:            # cannot specify with spec.jwksCluster.trustedCA
+            instanceName: <instance-name>
+            certificateName: <certificate-name>
   audiences: [<aud-claims>]
   locations: 
     header: 
@@ -360,6 +434,7 @@ Specifies a remote source for the JSON Web Key Set and configures behavior when 
   - [`CacheDuration`](#jsonwebkeyset-remote-cacheduration) 
   - [`FetchAsynchronously`](#jsonwebkeyset-remote-fetchasynchronously)
   - [`RetryPolicy`](#jsonwebkeyset-remote-retrypolicy)
+  - [`JWKSCluster`](#jsonwebkeyset-remote-jwkscluster)
 
 ### `JSONWebKeySet{}.Remote{}.URI`
 
@@ -435,6 +510,79 @@ Specifies a jittered exponential backoff strategy. When this field is empty, Env
 | :-------- | :------------------------------------------------- | :-------- | :------------ |
 | `BaseInterval`| Specifies the base interval to use for the next back off computation. | String | `1s` |
 | `MaxInterval` | Specifies the maximum interval between retries. By default, this value is 10 times `BaseInterval`. | String | `10s` |
+
+### `JSONWebKeySet{}.Remote{}.JWKSCluster`
+
+Defines how the specified Remote JWKS URI is to be fetched.
+
+#### Values
+
+- Default: None
+- Data type: Map that can contain the following parameters:
+
+  - [`TLSCertificates`](#jsonwebkeyset-remote-jwkscluster-tlscertificates)
+  - [`DiscoveryType`](#jsonwebkeyset-remote-jwkscluster-discoverytype)
+  - [`ConnectTimeout`](#jsonwebkeyset-remote-jwkscluster-connecttimeout)
+
+### `JSONWebKeySet{}.Remote{}.JWKSCluster{}.ConnectTimeout`
+
+Specifies the timeout for new network connections to hosts in the cluster.
+
+#### Values
+
+- Default: `5s`
+- Data type: String
+
+### `JSONWebKeySet{}.Remote{}.JWKSCluster{}.DiscoveryType`
+
+Specifies the service discovery type to use for resolving the cluster.
+The discovery type options are: STRICT_DNS, STATIC, LOGICAL_DNS, EDS and ORIGINAL_DST.
+
+#### Values
+
+- Default: STRICT_DNS
+- Data type: String
+
+### `JSONWebKeySet{}.Remote{}.JWKSCluster{}.TLSCertificates`
+
+Specifies the data containing certificate authority certificates to use in
+verifying a presented peer certificate. If not specified and a peer certificate is presented
+it will not be verified. You cannot specify [`TLSCertificates{}.CaCertificateProviderInstance`](#jsonwebkeyset-remote-jwkscluster-tlscertificates-cacertificateproviderinstance) and [`TLSCertificates{}.TrustedCA`](#jsonwebkeyset-remote-jwkscluster-tlscertificates-trustedca) in the same map.
+
+#### Values
+
+- Default: None
+- Data type: Map that can contain the following parameters:
+
+  - [`CaCertificateProviderInstance`](#jsonwebkeyset-remote-jwkscluster-tlscertificates-cacertificateproviderinstance)
+  - [`TrustedCA`](#jsonwebkeyset-remote-jwkscluster-tlscertificates-trustedca)
+
+### `JSONWebKeySet{}.Remote{}.JWKSCluster{}.TLSCertificates{}.CaCertificateProviderInstance`
+
+Speficies the certificate provider instance for fetching TLS certificates.
+
+#### Values
+
+- Default: None
+- Data type: Map that can contain the following parameters:
+
+| Parameter | Description                                        | Data type | Default value |
+| :-------- | :------------------------------------------------- | :-------- | :------------ |
+| `InstanceName`| Refers to the certificate provider instance name. | String | `default` |
+| `CertificateName` | certificate instances or types. For example, "ROOTCA" to specify a root-certificate. | String | None |
+ 
+### `JSONWebKeySet{}.Remote{}.JWKSCluster{}.TLSCertificates{}.TrustedCA`
+
+Specifies TLS certificate data containing certificate authority certificates. Exactly one of Filename, EnvironmentVariable, InlineString or InlineBytes must be specified.
+
+#### Values
+
+| Parameter | Description                                        | Data type | Default value |
+| :-------- | :------------------------------------------------- | :-------- | :------------ |
+| `Filename`| Local filesystem data source.                      | String    | None          |
+| `EnvironmentVariable` | Environment variable data source.      | String    | None          |
+| `InlineString` | String inlined in the configuration.          | String    | None          |
+| `InlineBytes` | Bytes inlined in the configuration.            | String    | None          |
 
 ### `Audiences`
 
@@ -793,6 +941,79 @@ Specifies a jittered exponential backoff strategy. When this field is empty, Env
 | :-------- | :------------------------------------------------- | :-------- | :------------ |
 | `baseInterval`| Specifies the base interval to use for the next back off computation. | String | `1s` |
 | `maxInterval` | Specifies the maximum interval between retries. By default, this value is 10 times `BaseInterval`. | String | `10s` |
+
+### `spec.jsonWebKeySet.remote.jwksCluster`
+
+Defines how the specified Remote JWKS URI is to be fetched.
+
+#### Values
+
+- Default: None
+- Data type: Map that can contain the following parameters:
+
+  - [`tlsCertificates`](#spec-jsonwebkeyset-remote-jwkscluster-tlscertificates)
+  - [`discoveryType`](#spec-jsonwebkeyset-remote-jwkscluster-discoverytype)
+  - [`connectTimeout`](#spec-jsonwebkeyset-remote-jwkscluster-connecttimeout)
+
+### `spec.jsonWebKeySet.remote.jwksCluster.connectTimeout`
+
+Specifies the timeout for new network connections to hosts in the cluster.
+
+#### Values
+
+- Default: `5s`
+- Data type: String
+
+### `spec.jsonWebKeySet.remote.jwksCluster.discoveryType`
+
+Specifies the service discovery type to use for resolving the cluster.
+The discovery type options are: STRICT_DNS, STATIC, LOGICAL_DNS, EDS and ORIGINAL_DST.
+
+#### Values
+
+- Default: STRICT_DNS
+- Data type: String
+
+### `spec.jsonWebKeySet.remote.jwksCluster.tlsCertificates`
+
+Specifies the data containing certificate authority certificates to use in
+verifying a presented peer certificate. If not specified and a peer certificate is presented
+it will not be verified. You cannot specify [`spec.tlsCertificates.caCertificateProviderInstance`](#spec-jsonwebkeyset-remote-jwkscluster-tlscertificates-cacertificateproviderinstance) and [`spec.tlsCertificates.trustedCA`](#spec-jsonwebkeyset-remote-jwkscluster-tlscertificates-trustedca) in the same map.
+
+#### Values
+
+- Default: None
+- Data type: Map that can contain the following parameters:
+
+  - [`caCertificateProviderInstance`](#spec-jsonwebkeyset-remote-jwkscluster-tlscertificates-cacertificateproviderinstance)
+  - [`trustedCA`](#spec-jsonwebkeyset-remote-jwkscluster-tlscertificates-trustedca)
+
+### `spec.jsonWebKeySet.remote.jwksCluster.tlsCertificates.caCertificateProviderInstance`
+
+Speficies the certificate provider instance for fetching TLS certificates.
+
+#### Values
+
+- Default: None
+- Data type: Map that can contain the following parameters:
+
+| Parameter | Description                                        | Data type | Default value |
+| :-------- | :------------------------------------------------- | :-------- | :------------ |
+| `instanceName`| Refers to the certificate provider instance name. | String | `default` |
+| `certificateName` | certificate instances or types. For example, "ROOTCA" to specify a root-certificate. | String | None |
+ 
+### `spec.jsonWebKeySet.remote.jwksCluster.tlsCertificates.trustedCA`
+
+Specifies TLS certificate data containing certificate authority certificates. Exactly one of Filename, EnvironmentVariable, InlineString or InlineBytes must be specified.
+
+#### Values
+
+| Parameter | Description                                        | Data type | Default value |
+| :-------- | :------------------------------------------------- | :-------- | :------------ |
+| `filename`| Local filesystem data source.                      | String    | None          |
+| `environmentVariable` | Environment variable data source.      | String    | None          |
+| `inlineString` | String inlined in the configuration.          | String    | None          |
+| `inlineBytes` | Bytes inlined in the configuration.            | String    | None          |
 
 ### `spec.audiences`
 
