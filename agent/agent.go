@@ -65,12 +65,14 @@ import (
 	"github.com/hashicorp/consul/agent/xds"
 	"github.com/hashicorp/consul/api"
 	"github.com/hashicorp/consul/api/watch"
+	internalresource "github.com/hashicorp/consul/internal/resource"
 	"github.com/hashicorp/consul/ipaddr"
 	"github.com/hashicorp/consul/lib"
 	"github.com/hashicorp/consul/lib/file"
 	"github.com/hashicorp/consul/lib/mutex"
 	"github.com/hashicorp/consul/lib/routine"
 	"github.com/hashicorp/consul/logging"
+	"github.com/hashicorp/consul/proto-public/pbresource"
 	"github.com/hashicorp/consul/proto/private/pboperator"
 	"github.com/hashicorp/consul/proto/private/pbpeering"
 	"github.com/hashicorp/consul/tlsutil"
@@ -202,6 +204,10 @@ type delegate interface {
 	Shutdown() error
 	Stats() map[string]map[string]string
 	ReloadConfig(config consul.ReloadableConfig) error
+
+	TypeRegistry() internalresource.Registry
+	ResourceServiceClient() pbresource.ResourceServiceClient
+
 	enterpriseDelegate
 }
 

@@ -2151,6 +2151,13 @@ func convertConsulConfigToRateLimitHandlerConfig(limitsConfig RequestLimits, mul
 	return hc
 }
 
+func (s *Server) ResourceServiceClient() pbresource.ResourceServiceClient {
+	// TODO: Don't skip auth!
+	return s.internalResourceServiceClient
+}
+
+func (s *Server) TypeRegistry() resource.Registry { return s.typeRegistry }
+
 // peersInfoContent is used to help operators understand what happened to the
 // peers.json file. This is written to a file called peers.info in the same
 // location.
