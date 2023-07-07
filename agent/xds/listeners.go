@@ -1291,6 +1291,7 @@ func (s *ResourceGenerator) makeInboundListener(cfgSnap *proxycfg.ConfigSnapshot
 					partition:   cfgSnap.ProxyID.PartitionOrDefault(),
 				},
 				cfgSnap.ConnectProxy.InboundPeerTrustBundles,
+				cfgSnap.JWTProviders,
 			)
 			if err != nil {
 				return nil, err
@@ -1377,6 +1378,7 @@ func (s *ResourceGenerator) makeInboundListener(cfgSnap *proxycfg.ConfigSnapshot
 				partition:   cfgSnap.ProxyID.PartitionOrDefault(),
 			},
 			cfgSnap.ConnectProxy.InboundPeerTrustBundles,
+			cfgSnap.JWTProviders,
 		)
 		if err != nil {
 			return nil, err
@@ -1844,6 +1846,7 @@ func (s *ResourceGenerator) makeFilterChainTerminatingGateway(cfgSnap *proxycfg.
 				partition:   cfgSnap.ProxyID.PartitionOrDefault(),
 			},
 			nil, // TODO(peering): verify intentions w peers don't apply to terminatingGateway
+			cfgSnap.JWTProviders,
 		)
 		if err != nil {
 			return nil, err

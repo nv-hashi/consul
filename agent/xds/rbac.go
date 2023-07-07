@@ -28,7 +28,10 @@ func makeRBACNetworkFilter(
 	localInfo rbacLocalInfo,
 	peerTrustBundles []*pbpeering.PeeringTrustBundle,
 ) (*envoy_listener_v3.Filter, error) {
-	rules := makeRBACRules(intentions, intentionDefaultAllow, localInfo, false, peerTrustBundles)
+	rules, err := makeRBACRules(intentions, intentionDefaultAllow, localInfo, false, peerTrustBundles, map[string]*structs.JWTProviderConfigEntry{})
+	if err != nil {
+		return nil, err
+	}
 
 	cfg := &envoy_network_rbac_v3.RBAC{
 		StatPrefix: "connect_authz",
@@ -42,8 +45,12 @@ func makeRBACHTTPFilter(
 	intentionDefaultAllow bool,
 	localInfo rbacLocalInfo,
 	peerTrustBundles []*pbpeering.PeeringTrustBundle,
+	pCE map[string]*structs.JWTProviderConfigEntry,
 ) (*envoy_http_v3.HttpFilter, error) {
-	rules := makeRBACRules(intentions, intentionDefaultAllow, localInfo, true, peerTrustBundles)
+	rules, err := makeRBACRules(intentions, intentionDefaultAllow, localInfo, true, peerTrustBundles, pCE)
+	if err != nil {
+		return nil, err
+	}
 
 	cfg := &envoy_http_rbac_v3.RBAC{
 		Rules: rules,
@@ -56,7 +63,8 @@ func intentionListToIntermediateRBACForm(
 	localInfo rbacLocalInfo,
 	isHTTP bool,
 	trustBundlesByPeer map[string]*pbpeering.PeeringTrustBundle,
-) []*rbacIntention {
+	pCE map[string]*structs.JWTProviderConfigEntry,
+) ([]*rbacIntention, error) {
 	sort.Sort(structs.IntentionPrecedenceSorter(intentions))
 
 	// Omit any lower-precedence intentions that share the same source.
@@ -73,10 +81,13 @@ func intentionListToIntermediateRBACForm(
 			continue
 		}
 
-		rixn := intentionToIntermediateRBACForm(ixn, localInfo, isHTTP, trustBundle)
+		rixn, err := intentionToIntermediateRBACForm(ixn, localInfo, isHTTP, trustBundle, pCE)
+		if err != nil {
+			return nil, err
+		}
 		rbacIxns = append(rbacIxns, rixn)
 	}
-	return rbacIxns
+	return rbacIxns, nil
 }
 
 func removeSourcePrecedence(rbacIxns []*rbacIntention, intentionDefaultAction intentionAction, localInfo rbacLocalInfo) []*rbacIntention {
@@ -205,10 +216,38 @@ func removePermissionPrecedence(perms []*rbacPermission, intentionDefaultAction 
 		}
 
 		perm.ComputedPermission = perm.Flatten()
+
+		//attach jwt permissions
+		perm.ComputedPermission = perm.GenerateJWTPermissions()
 		out = append(out, perm)
 	}
 
 	return out
+}
+
+func (p *rbacPermission) GenerateJWTPermissions() *envoy_rbac_v3.Permission {
+	if p.jwtInfos == nil {
+		return p.ComputedPermission
+	}
+
+	var jwtPerms []*envoy_rbac_v3.Permission
+
+	for _, info := range p.jwtInfos {
+		claimsPermission := jwtInfosToPermission(info.ProviderRequirement.VerifyClaims, info.MetadataPayloadKey)
+		segments := pathToSegments([]string{"iss"}, info.MetadataPayloadKey)
+		issuerPermission := segmentToPermission(segments, info.Provider.Issuer)
+
+		perm := andPermissions([]*envoy_rbac_v3.Permission{
+			issuerPermission, claimsPermission,
+		})
+		jwtPerms = append(jwtPerms, perm)
+	}
+	if len(jwtPerms) > 0 {
+		jwtPerm := orPermissions(jwtPerms)
+		return andPermissions([]*envoy_rbac_v3.Permission{p.ComputedPermission, jwtPerm})
+	}
+
+	return p.ComputedPermission
 }
 
 func intentionToIntermediateRBACForm(
@@ -216,7 +255,8 @@ func intentionToIntermediateRBACForm(
 	localInfo rbacLocalInfo,
 	isHTTP bool,
 	bundle *pbpeering.PeeringTrustBundle,
-) *rbacIntention {
+	pCE map[string]*structs.JWTProviderConfigEntry,
+) (*rbacIntention, error) {
 	rixn := &rbacIntention{
 		Source: rbacService{
 			ServiceName: ixn.SourceServiceName(),
@@ -233,14 +273,18 @@ func intentionToIntermediateRBACForm(
 	}
 
 	if isHTTP && ixn.JWT != nil {
-		var c []*JWTInfo
+		var jwts []*JWTInfo
 		for _, prov := range ixn.JWT.Providers {
-			if len(prov.VerifyClaims) > 0 {
-				c = append(c, makeJWTInfos(prov, nil, 0))
+			jwtProvider, ok := pCE[prov.Name]
+
+			if !ok {
+				return nil, fmt.Errorf("provider specified in intention does not exist. Provider name: %s", prov.Name)
 			}
+			jwts = append(jwts, makeJWTInfos(prov, jwtProvider))
 		}
-		if len(c) > 0 {
-			rixn.jwtInfos = c
+
+		if len(jwts) > 0 {
+			rixn.jwtInfos = jwts
 		}
 	}
 
@@ -248,21 +292,24 @@ func intentionToIntermediateRBACForm(
 		if isHTTP {
 			rixn.Action = intentionActionLayer7
 			rixn.Permissions = make([]*rbacPermission, 0, len(ixn.Permissions))
-			for k, perm := range ixn.Permissions {
+			for _, perm := range ixn.Permissions {
 				rbacPerm := rbacPermission{
 					Definition: perm,
 					Action:     intentionActionFromString(perm.Action),
 					Perm:       convertPermission(perm),
 				}
+
 				if perm.JWT != nil {
-					var c []*JWTInfo
+					var jwts []*JWTInfo
 					for _, prov := range perm.JWT.Providers {
-						if len(prov.VerifyClaims) > 0 {
-							c = append(c, makeJWTInfos(prov, perm, k))
+						jwtProvider, ok := pCE[prov.Name]
+						if !ok {
+							return nil, fmt.Errorf("provider specified in intention does not exist. Provider name: %s", prov.Name)
 						}
+						jwts = append(jwts, makeJWTInfos(prov, jwtProvider))
 					}
-					if len(c) > 0 {
-						rbacPerm.jwtInfos = c
+					if len(jwts) > 0 {
+						rbacPerm.jwtInfos = jwts
 					}
 				}
 				rixn.Permissions = append(rixn.Permissions, &rbacPerm)
@@ -275,18 +322,23 @@ func intentionToIntermediateRBACForm(
 		rixn.Action = intentionActionFromString(ixn.Action)
 	}
 
-	return rixn
+	return rixn, nil
 }
 
-func makeJWTInfos(p *structs.IntentionJWTProvider, perm *structs.IntentionPermission, permKey int) *JWTInfo {
-	return &JWTInfo{Claims: p.VerifyClaims, MetadataPayloadKey: buildPayloadInMetadataKey(p.Name, perm, permKey)}
+func makeJWTInfos(p *structs.IntentionJWTProvider, ce *structs.JWTProviderConfigEntry) *JWTInfo {
+	return &JWTInfo{
+		ProviderRequirement: p,
+		MetadataPayloadKey:  buildPayloadInMetadataKey(p.Name),
+		Provider:            ce,
+	}
 }
 
 type intentionAction int
 
 type JWTInfo struct {
-	Claims             []*structs.IntentionJWTClaimVerification
-	MetadataPayloadKey string
+	Provider            *structs.JWTProviderConfigEntry
+	MetadataPayloadKey  string
+	ProviderRequirement *structs.IntentionJWTProvider
 }
 
 const (
@@ -526,7 +578,8 @@ func makeRBACRules(
 	localInfo rbacLocalInfo,
 	isHTTP bool,
 	peerTrustBundles []*pbpeering.PeeringTrustBundle,
-) *envoy_rbac_v3.RBAC {
+	pCE map[string]*structs.JWTProviderConfigEntry,
+) (*envoy_rbac_v3.RBAC, error) {
 	// TODO(banks,rb): Implement revocation list checking?
 
 	// TODO(peering): mkeeler asked that these maps come from proxycfg instead of
@@ -546,7 +599,10 @@ func makeRBACRules(
 	}
 
 	// First build up just the basic principal matches.
-	rbacIxns := intentionListToIntermediateRBACForm(intentions, localInfo, isHTTP, trustBundlesByPeer)
+	rbacIxns, err := intentionListToIntermediateRBACForm(intentions, localInfo, isHTTP, trustBundlesByPeer, pCE)
+	if err != nil {
+		return nil, err
+	}
 
 	// Normalize: if we are in default-deny then all intentions must be allows and vice versa
 	intentionDefaultAction := intentionActionFromBool(intentionDefaultAllow)
@@ -576,7 +632,7 @@ func makeRBACRules(
 	for i, rbacIxn := range rbacIxns {
 		var infos []*JWTInfo
 		if isHTTP {
-			infos = collectJWTInfos(rbacIxn)
+			infos = collectTopLevelJWTInfos(rbacIxn)
 		}
 		if rbacIxn.Action == intentionActionLayer7 {
 			if len(rbacIxn.Permissions) == 0 {
@@ -588,8 +644,7 @@ func makeRBACRules(
 
 			rbacPrincipals := optimizePrincipals([]*envoy_rbac_v3.Principal{rbacIxn.ComputedPrincipal})
 			if len(infos) > 0 {
-				claimsPrincipal := jwtInfosToPrincipals(infos)
-				rbacPrincipals = combineBasePrincipalWithJWTPrincipals(rbacPrincipals, claimsPrincipal)
+				rbacPrincipals = addJWTPrincipals(rbacPrincipals, infos)
 			}
 			// For L7: we should generate one Policy per Principal and list all of the Permissions
 			policy := &envoy_rbac_v3.Policy{
@@ -605,8 +660,7 @@ func makeRBACRules(
 			principalsL4 = append(principalsL4, rbacIxn.ComputedPrincipal)
 			// Append JWT principals to list of principals
 			if len(infos) > 0 {
-				claimsPrincipal := jwtInfosToPrincipals(infos)
-				principalsL4 = combineBasePrincipalWithJWTPrincipals(principalsL4, claimsPrincipal)
+				principalsL4 = addJWTPrincipals(principalsL4, infos)
 			}
 		}
 	}
@@ -620,49 +674,74 @@ func makeRBACRules(
 	if len(rbac.Policies) == 0 {
 		rbac.Policies = nil
 	}
-	return rbac
+	return rbac, nil
 }
 
-// combineBasePrincipalWithJWTPrincipals ensure each RBAC/Network principal is associated with
-// the JWT principal
-func combineBasePrincipalWithJWTPrincipals(p []*envoy_rbac_v3.Principal, cp *envoy_rbac_v3.Principal) []*envoy_rbac_v3.Principal {
-	res := make([]*envoy_rbac_v3.Principal, 0)
+// addJWTPrincipals ensure each RBAC/Network principal is associated with
+// a JWT principal when JWTs validation is required.
+//
+// For each jwtInfo, this builds a first principal that validates that the jwt token has the right issuer (`iss`).
+// It collects all the claims principal and combines them into a single principal using jwtClaimsToPrincipals.
+// It then combines the issuer principal and the claims principal into a single principal.
+//
+// After generating a single principal per info, it combines all the info principals into a single OrPrincipal.
+// This orPrincipal is then attached to each of the RBAC/NETWORK principal for jwt payload validation.
+func addJWTPrincipals(p []*envoy_rbac_v3.Principal, infos []*JWTInfo) []*envoy_rbac_v3.Principal {
+	if len(infos) == 0 {
+		return p
+	}
+	jwtPrincipals := make([]*envoy_rbac_v3.Principal, 0)
+	for _, info := range infos {
+		// build jwt provider issuer principal
+		segments := pathToSegments([]string{"iss"}, info.MetadataPayloadKey)
+		p := segmentToPrincipal(segments, info.Provider.Issuer)
 
+		// add jwt provider claims principal if any
+		if cp := jwtClaimsToPrincipals(info.ProviderRequirement.VerifyClaims, info.MetadataPayloadKey); cp != nil {
+			p = andPrincipals([]*envoy_rbac_v3.Principal{p, cp})
+		}
+		jwtPrincipals = append(jwtPrincipals, p)
+	}
+
+	// make jwt principals into 1 single principal
+	jwtFinalPrincipal := orPrincipals(jwtPrincipals)
+
+	// add the big jwt principal to each rbac/network principal
+	res := make([]*envoy_rbac_v3.Principal, 0)
 	for _, principal := range p {
-		if principal != nil && cp != nil {
-			p := andPrincipals([]*envoy_rbac_v3.Principal{principal, cp})
+		if principal != nil && jwtFinalPrincipal != nil {
+			p := andPrincipals([]*envoy_rbac_v3.Principal{principal, jwtFinalPrincipal})
 			res = append(res, p)
 		}
 	}
 	return res
 }
 
-// collectJWTInfos extracts all the collected JWTInfos top level infos
-// and permission level infos and returns them as a single array
-func collectJWTInfos(rbacIxn *rbacIntention) []*JWTInfo {
+// collectTopLevelJWTInfos extracts all the top level jwt infos.
+func collectTopLevelJWTInfos(rbacIxn *rbacIntention) []*JWTInfo {
 	infos := make([]*JWTInfo, 0, len(rbacIxn.jwtInfos))
 
 	if len(rbacIxn.jwtInfos) > 0 {
 		infos = append(infos, rbacIxn.jwtInfos...)
 	}
-	for _, perm := range rbacIxn.Permissions {
-		infos = append(infos, perm.jwtInfos...)
-	}
 
 	return infos
 }
 
-func jwtInfosToPrincipals(c []*JWTInfo) *envoy_rbac_v3.Principal {
+func jwtClaimsToPrincipals(claims []*structs.IntentionJWTClaimVerification, payloadkey string) *envoy_rbac_v3.Principal {
 	ps := make([]*envoy_rbac_v3.Principal, 0)
 
-	for _, jwtInfo := range c {
-		if jwtInfo != nil {
-			for _, claim := range jwtInfo.Claims {
-				ps = append(ps, jwtClaimToPrincipal(claim, jwtInfo.MetadataPayloadKey))
-			}
-		}
+	for _, claim := range claims {
+		ps = append(ps, jwtClaimToPrincipal(claim, payloadkey))
 	}
-	return orPrincipals(ps)
+	switch len(ps) {
+	case 0:
+		return nil
+	case 1:
+		return ps[0]
+	default:
+		return andPrincipals(ps)
+	}
 }
 
 // jwtClaimToPrincipal takes in a payloadkey which is the metadata key. This key is generated by using provider name,
@@ -672,7 +751,10 @@ func jwtInfosToPrincipals(c []*JWTInfo) *envoy_rbac_v3.Principal {
 // come from the Path included in the IntentionJWTClaimVerification param.
 func jwtClaimToPrincipal(c *structs.IntentionJWTClaimVerification, payloadKey string) *envoy_rbac_v3.Principal {
 	segments := pathToSegments(c.Path, payloadKey)
+	return segmentToPrincipal(segments, c.Value)
+}
 
+func segmentToPrincipal(segments []*envoy_matcher_v3.MetadataMatcher_PathSegment, v string) *envoy_rbac_v3.Principal {
 	return &envoy_rbac_v3.Principal{
 		Identifier: &envoy_rbac_v3.Principal_Metadata{
 			Metadata: &envoy_matcher_v3.MetadataMatcher{
@@ -682,7 +764,41 @@ func jwtClaimToPrincipal(c *structs.IntentionJWTClaimVerification, payloadKey st
 					MatchPattern: &envoy_matcher_v3.ValueMatcher_StringMatch{
 						StringMatch: &envoy_matcher_v3.StringMatcher{
 							MatchPattern: &envoy_matcher_v3.StringMatcher_Exact{
-								Exact: c.Value,
+								Exact: v,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func jwtInfosToPermission(claims []*structs.IntentionJWTClaimVerification, payloadkey string) *envoy_rbac_v3.Permission {
+	ps := make([]*envoy_rbac_v3.Permission, 0)
+
+	for _, claim := range claims {
+		ps = append(ps, jwtClaimToPermission(claim, payloadkey))
+	}
+	return andPermissions(ps)
+}
+
+func jwtClaimToPermission(c *structs.IntentionJWTClaimVerification, payloadKey string) *envoy_rbac_v3.Permission {
+	segments := pathToSegments(c.Path, payloadKey)
+	return segmentToPermission(segments, c.Value)
+}
+
+func segmentToPermission(segments []*envoy_matcher_v3.MetadataMatcher_PathSegment, v string) *envoy_rbac_v3.Permission {
+	return &envoy_rbac_v3.Permission{
+		Rule: &envoy_rbac_v3.Permission_Metadata{
+			Metadata: &envoy_matcher_v3.MetadataMatcher{
+				Filter: jwtEnvoyFilter,
+				Path:   segments,
+				Value: &envoy_matcher_v3.ValueMatcher{
+					MatchPattern: &envoy_matcher_v3.ValueMatcher_StringMatch{
+						StringMatch: &envoy_matcher_v3.StringMatcher{
+							MatchPattern: &envoy_matcher_v3.StringMatcher_Exact{
+								Exact: v,
 							},
 						},
 					},
@@ -1200,6 +1316,23 @@ func andPermissions(perms []*envoy_rbac_v3.Permission) *envoy_rbac_v3.Permission
 		return &envoy_rbac_v3.Permission{
 			Rule: &envoy_rbac_v3.Permission_AndRules{
 				AndRules: &envoy_rbac_v3.Permission_Set{
+					Rules: perms,
+				},
+			},
+		}
+	}
+}
+
+func orPermissions(perms []*envoy_rbac_v3.Permission) *envoy_rbac_v3.Permission {
+	switch len(perms) {
+	case 0:
+		return anyPermission()
+	case 1:
+		return perms[0]
+	default:
+		return &envoy_rbac_v3.Permission{
+			Rule: &envoy_rbac_v3.Permission_OrRules{
+				OrRules: &envoy_rbac_v3.Permission_Set{
 					Rules: perms,
 				},
 			},
