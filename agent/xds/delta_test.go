@@ -5,6 +5,7 @@ package xds
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	"github.com/armon/go-metrics"
+	envoy_cluster_v3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
+	envoy_listener_v3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	envoy_discovery_v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	"github.com/hashicorp/go-hclog"
 	goversion "github.com/hashicorp/go-version"
@@ -1613,7 +1616,7 @@ func requireExtensionMetrics(
 	}
 }
 
-func Test_applyEnvoyExtension_Validations(t *testing.T) {
+func Test_validateAndApplyEnvoyExtension_Validations(t *testing.T) {
 	type testCase struct {
 		name          string
 		runtimeConfig extensioncommon.RuntimeConfig
@@ -1707,7 +1710,7 @@ func Test_applyEnvoyExtension_Validations(t *testing.T) {
 					ServiceID: structs.NewServiceID("s1", nil),
 				},
 			}
-			err := applyEnvoyExtension(hclog.NewNullLogger(), &snap, nil, tc.runtimeConfig, envoyVersion, consulVersion)
+			_, err := validateAndApplyEnvoyExtension(hclog.NewNullLogger(), &snap, nil, tc.runtimeConfig, envoyVersion, consulVersion)
 			if tc.err {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tc.errString)
@@ -1716,4 +1719,212 @@ func Test_applyEnvoyExtension_Validations(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_applyEnvoyExtension_CanApply(t *testing.T) {
+	type testCase struct {
+		canApply bool
+	}
+
+	cases := map[string]testCase{
+		"cannot apply: is not applied": {
+			canApply: false,
+		},
+		"can apply: is applied": {
+			canApply: true,
+		},
+	}
+
+	for n, tc := range cases {
+		t.Run(n, func(t *testing.T) {
+			extender := extensioncommon.BasicEnvoyExtender{
+				Extension: &maybeCanApplyExtension{
+					canApply: tc.canApply,
+				},
+			}
+			config := &extensioncommon.RuntimeConfig{
+				Kind:                  api.ServiceKindConnectProxy,
+				ServiceName:           api.CompoundServiceName{Name: "api"},
+				Upstreams:             map[api.CompoundServiceName]*extensioncommon.UpstreamData{},
+				IsSourcedFromUpstream: false,
+				EnvoyExtension: api.EnvoyExtension{
+					Name:     "maybeCanApplyExtension",
+					Required: false,
+				},
+			}
+			listener := &envoy_listener_v3.Listener{
+				Name:                  xdscommon.OutboundListenerName,
+				IgnoreGlobalConnLimit: false,
+			}
+			indexedResources := xdscommon.IndexResources(testutil.Logger(t), map[string][]proto.Message{
+				xdscommon.ListenerType: {
+					listener,
+				},
+			})
+
+			result, err := applyEnvoyExtension(&extender, indexedResources, config)
+			require.NoError(t, err)
+			resultListener := result.Index[xdscommon.ListenerType][xdscommon.OutboundListenerName].(*envoy_listener_v3.Listener)
+			require.Equal(t, tc.canApply, resultListener.IgnoreGlobalConnLimit)
+		})
+	}
+}
+
+func Test_applyEnvoyExtension_PartialApplicationDisallowed(t *testing.T) {
+	type testCase struct {
+		fail            bool
+		returnOnFailure bool
+		expectModified  bool
+	}
+
+	cases := map[string]testCase{
+		"failure: returns nothing": {
+			fail:            true,
+			returnOnFailure: false,
+			expectModified:  false,
+		},
+		// Not expected, but cover to be sure.
+		"failure: returns values": {
+			fail:            true,
+			returnOnFailure: true,
+			expectModified:  false,
+		},
+		// Ensure that under normal circumstances, the extension would succeed in
+		// modifying resources.
+		"success: resources modified": {
+			fail:           false,
+			expectModified: true,
+		},
+	}
+
+	for n, tc := range cases {
+		for _, indexType := range []string{
+			xdscommon.ListenerType,
+			xdscommon.ClusterType,
+		} {
+			typeShortName := indexType[strings.LastIndex(indexType, ".")+1:]
+			t.Run(fmt.Sprintf("%s: %s", n, typeShortName), func(t *testing.T) {
+				extender := extensioncommon.BasicEnvoyExtender{
+					Extension: &partialFailureExtension{
+						returnOnFailure: tc.returnOnFailure,
+						// Alternate which resource fails so that we can test for
+						// partial modification independent of patch order.
+						failListener: tc.fail && indexType == xdscommon.ListenerType,
+						failCluster:  tc.fail && indexType == xdscommon.ClusterType,
+					},
+				}
+				config := &extensioncommon.RuntimeConfig{
+					Kind:                  api.ServiceKindConnectProxy,
+					ServiceName:           api.CompoundServiceName{Name: "api"},
+					Upstreams:             map[api.CompoundServiceName]*extensioncommon.UpstreamData{},
+					IsSourcedFromUpstream: false,
+					EnvoyExtension: api.EnvoyExtension{
+						Name:     "partialFailureExtension",
+						Required: false,
+					},
+				}
+				cluster := &envoy_cluster_v3.Cluster{
+					Name:          xdscommon.LocalAppClusterName,
+					RespectDnsTtl: false,
+				}
+				listener := &envoy_listener_v3.Listener{
+					Name:                  xdscommon.OutboundListenerName,
+					IgnoreGlobalConnLimit: false,
+				}
+				indexedResources := xdscommon.IndexResources(testutil.Logger(t), map[string][]proto.Message{
+					xdscommon.ClusterType: {
+						cluster,
+					},
+					xdscommon.ListenerType: {
+						listener,
+					},
+				})
+
+				result, err := applyEnvoyExtension(&extender, indexedResources, config)
+				if tc.fail {
+					require.Error(t, err)
+				} else {
+					require.NoError(t, err)
+				}
+
+				resultListener := result.Index[xdscommon.ListenerType][xdscommon.OutboundListenerName].(*envoy_listener_v3.Listener)
+				resultCluster := result.Index[xdscommon.ClusterType][xdscommon.LocalAppClusterName].(*envoy_cluster_v3.Cluster)
+				require.Equal(t, tc.expectModified, resultListener.IgnoreGlobalConnLimit)
+				require.Equal(t, tc.expectModified, resultCluster.RespectDnsTtl)
+
+				// Regardless of success, original values should not be modified.
+				originalListener := indexedResources.Index[xdscommon.ListenerType][xdscommon.OutboundListenerName].(*envoy_listener_v3.Listener)
+				originalCluster := indexedResources.Index[xdscommon.ClusterType][xdscommon.LocalAppClusterName].(*envoy_cluster_v3.Cluster)
+				require.False(t, originalListener.IgnoreGlobalConnLimit)
+				require.False(t, originalCluster.RespectDnsTtl)
+			})
+		}
+	}
+}
+
+type maybeCanApplyExtension struct {
+	extensioncommon.BasicExtensionAdapter
+	canApply bool
+}
+
+var _ extensioncommon.BasicExtension = (*maybeCanApplyExtension)(nil)
+
+func (m *maybeCanApplyExtension) CanApply(_ *extensioncommon.RuntimeConfig) bool {
+	return m.canApply
+}
+
+func (m *maybeCanApplyExtension) PatchListener(payload extensioncommon.ListenerPayload) (*envoy_listener_v3.Listener, bool, error) {
+	payload.Message.IgnoreGlobalConnLimit = true
+	return payload.Message, true, nil
+}
+
+type partialFailureExtension struct {
+	extensioncommon.BasicExtensionAdapter
+	returnOnFailure bool
+	failCluster     bool
+	failListener    bool
+}
+
+var _ extensioncommon.BasicExtension = (*partialFailureExtension)(nil)
+
+func (p *partialFailureExtension) CanApply(_ *extensioncommon.RuntimeConfig) bool {
+	return true
+}
+
+func (p *partialFailureExtension) PatchListener(payload extensioncommon.ListenerPayload) (*envoy_listener_v3.Listener, bool, error) {
+	// Modify original input message
+	payload.Message.IgnoreGlobalConnLimit = true
+
+	err := fmt.Errorf("oops - listener patch failed")
+	if !p.failListener {
+		err = nil
+	}
+
+	returnMsg := payload.Message
+	if err != nil && !p.returnOnFailure {
+		returnMsg = nil
+	}
+
+	patched := err == nil || p.returnOnFailure
+
+	return returnMsg, patched, err
+}
+
+func (p *partialFailureExtension) PatchCluster(payload extensioncommon.ClusterPayload) (*envoy_cluster_v3.Cluster, bool, error) {
+	// Modify original input message
+	payload.Message.RespectDnsTtl = true
+
+	err := fmt.Errorf("oops - cluster patch failed")
+	if !p.failCluster {
+		err = nil
+	}
+
+	returnMsg := payload.Message
+	if err != nil && !p.returnOnFailure {
+		returnMsg = nil
+	}
+
+	patched := err == nil || p.returnOnFailure
+
+	return returnMsg, patched, err
 }
