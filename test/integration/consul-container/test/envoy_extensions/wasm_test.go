@@ -39,8 +39,6 @@ func TestWASMRemote(t *testing.T) {
 	require.NoError(t, err, "could not get current working directory")
 	hostWASMDir := fmt.Sprintf("%s/testdata/wasm_test_files", cwd)
 
-	//buildWASM(t, hostWASMDir)
-
 	cluster, _, _ := topology.NewCluster(t, &topology.ClusterConfig{
 		NumServers:                1,
 		NumClients:                1,
@@ -200,12 +198,6 @@ func TestWASMRemote(t *testing.T) {
 // The extension takes an incoming request and adds the header "x-test:true"
 func TestWASMLocal(t *testing.T) {
 	t.Parallel()
-
-	//cwd, err := os.Getwd()
-	//require.NoError(t, err, "could not get current working directory")
-	//hostWASMDir := fmt.Sprintf("%s/testdata/wasm_test_files", cwd)
-
-	//buildWASM(t, hostWASMDir)
 
 	cluster, _, _ := topology.NewCluster(t, &topology.ClusterConfig{
 		NumServers:                1,
