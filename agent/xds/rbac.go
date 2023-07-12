@@ -216,8 +216,7 @@ func removePermissionPrecedence(perms []*rbacPermission, intentionDefaultAction 
 		}
 
 		perm.ComputedPermission = perm.Flatten()
-
-		//attach jwt permissions
+		//attach jwt permissions to computed permission
 		perm.ComputedPermission = perm.GenerateJWTPermissions()
 		out = append(out, perm)
 	}
@@ -225,29 +224,34 @@ func removePermissionPrecedence(perms []*rbacPermission, intentionDefaultAction 
 	return out
 }
 
+// GenerateJWTPermissions ensure the computed permission is associated with
+// a JWT permission when JWTs validation is required.
+//
+// For each JWTInfo (AKA provider required), this builds 1 single permission that validates that the jwt has
+// the right issuer (`iss`) field and validates the claims (if any).
+//
+// After generating a single permission per info, it combines all the info permissions into a single OrPermission.
+// This orPermission is then attached to initial computed permission for jwt payload and claims validation.
 func (p *rbacPermission) GenerateJWTPermissions() *envoy_rbac_v3.Permission {
-	if p.jwtInfos == nil {
+	if len(p.jwtInfos) == 0 {
 		return p.ComputedPermission
 	}
 
 	var jwtPerms []*envoy_rbac_v3.Permission
 
 	for _, info := range p.jwtInfos {
-		claimsPermission := jwtInfosToPermission(info.ProviderRequirement.VerifyClaims, info.MetadataPayloadKey)
-		segments := pathToSegments([]string{"iss"}, info.MetadataPayloadKey)
-		issuerPermission := segmentToPermission(segments, info.Provider.Issuer)
+		payloadKey := buildPayloadInMetadataKey(info.Provider.Name)
+		claimsPermission := jwtInfosToPermission(info.Provider.VerifyClaims, payloadKey)
+		issuerPermission := segmentToPermission(pathToSegments([]string{"iss"}, payloadKey), info.Issuer)
 
 		perm := andPermissions([]*envoy_rbac_v3.Permission{
 			issuerPermission, claimsPermission,
 		})
 		jwtPerms = append(jwtPerms, perm)
 	}
-	if len(jwtPerms) > 0 {
-		jwtPerm := orPermissions(jwtPerms)
-		return andPermissions([]*envoy_rbac_v3.Permission{p.ComputedPermission, jwtPerm})
-	}
 
-	return p.ComputedPermission
+	jwtPerm := orPermissions(jwtPerms)
+	return andPermissions([]*envoy_rbac_v3.Permission{p.ComputedPermission, jwtPerm})
 }
 
 func intentionToIntermediateRBACForm(
@@ -280,12 +284,10 @@ func intentionToIntermediateRBACForm(
 			if !ok {
 				return nil, fmt.Errorf("provider specified in intention does not exist. Provider name: %s", prov.Name)
 			}
-			jwts = append(jwts, makeJWTInfos(prov, jwtProvider))
+			jwts = append(jwts, newJWTInfo(prov, jwtProvider))
 		}
 
-		if len(jwts) > 0 {
-			rixn.jwtInfos = jwts
-		}
+		rixn.jwtInfos = jwts
 	}
 
 	if len(ixn.Permissions) > 0 {
@@ -306,7 +308,7 @@ func intentionToIntermediateRBACForm(
 						if !ok {
 							return nil, fmt.Errorf("provider specified in intention does not exist. Provider name: %s", prov.Name)
 						}
-						jwts = append(jwts, makeJWTInfos(prov, jwtProvider))
+						jwts = append(jwts, newJWTInfo(prov, jwtProvider))
 					}
 					if len(jwts) > 0 {
 						rbacPerm.jwtInfos = jwts
@@ -325,20 +327,21 @@ func intentionToIntermediateRBACForm(
 	return rixn, nil
 }
 
-func makeJWTInfos(p *structs.IntentionJWTProvider, ce *structs.JWTProviderConfigEntry) *JWTInfo {
+func newJWTInfo(p *structs.IntentionJWTProvider, ce *structs.JWTProviderConfigEntry) *JWTInfo {
 	return &JWTInfo{
-		ProviderRequirement: p,
-		MetadataPayloadKey:  buildPayloadInMetadataKey(p.Name),
-		Provider:            ce,
+		Provider: p,
+		Issuer:   ce.Issuer,
 	}
 }
 
 type intentionAction int
 
 type JWTInfo struct {
-	Provider            *structs.JWTProviderConfigEntry
-	MetadataPayloadKey  string
-	ProviderRequirement *structs.IntentionJWTProvider
+	// Provider issuer
+	// this information is coming from the config entry
+	Issuer string
+	// Provider is the intention provider
+	Provider *structs.IntentionJWTProvider
 }
 
 const (
@@ -632,7 +635,7 @@ func makeRBACRules(
 	for i, rbacIxn := range rbacIxns {
 		var infos []*JWTInfo
 		if isHTTP {
-			infos = collectTopLevelJWTInfos(rbacIxn)
+			infos = rbacIxn.jwtInfos
 		}
 		if rbacIxn.Action == intentionActionLayer7 {
 			if len(rbacIxn.Permissions) == 0 {
@@ -643,9 +646,7 @@ func makeRBACRules(
 			}
 
 			rbacPrincipals := optimizePrincipals([]*envoy_rbac_v3.Principal{rbacIxn.ComputedPrincipal})
-			if len(infos) > 0 {
-				rbacPrincipals = addJWTPrincipals(rbacPrincipals, infos)
-			}
+			rbacPrincipals = addJWTPrincipals(rbacPrincipals, infos)
 			// For L7: we should generate one Policy per Principal and list all of the Permissions
 			policy := &envoy_rbac_v3.Policy{
 				Principals:  rbacPrincipals,
@@ -659,9 +660,7 @@ func makeRBACRules(
 			// For L4: we should generate one big Policy listing all Principals
 			principalsL4 = append(principalsL4, rbacIxn.ComputedPrincipal)
 			// Append JWT principals to list of principals
-			if len(infos) > 0 {
-				principalsL4 = addJWTPrincipals(principalsL4, infos)
-			}
+			principalsL4 = addJWTPrincipals(principalsL4, infos)
 		}
 	}
 	if len(principalsL4) > 0 {
@@ -680,7 +679,7 @@ func makeRBACRules(
 // addJWTPrincipals ensure each RBAC/Network principal is associated with
 // a JWT principal when JWTs validation is required.
 //
-// For each jwtInfo, this builds a first principal that validates that the jwt token has the right issuer (`iss`).
+// For each jwtInfo, this builds a first principal that validates that the jwt has the right issuer (`iss`).
 // It collects all the claims principal and combines them into a single principal using jwtClaimsToPrincipals.
 // It then combines the issuer principal and the claims principal into a single principal.
 //
@@ -692,12 +691,14 @@ func addJWTPrincipals(p []*envoy_rbac_v3.Principal, infos []*JWTInfo) []*envoy_r
 	}
 	jwtPrincipals := make([]*envoy_rbac_v3.Principal, 0)
 	for _, info := range infos {
+		payloadKey := buildPayloadInMetadataKey(info.Provider.Name)
+
 		// build jwt provider issuer principal
-		segments := pathToSegments([]string{"iss"}, info.MetadataPayloadKey)
-		p := segmentToPrincipal(segments, info.Provider.Issuer)
+		segments := pathToSegments([]string{"iss"}, payloadKey)
+		p := segmentToPrincipal(segments, info.Issuer)
 
 		// add jwt provider claims principal if any
-		if cp := jwtClaimsToPrincipals(info.ProviderRequirement.VerifyClaims, info.MetadataPayloadKey); cp != nil {
+		if cp := jwtClaimsToPrincipals(info.Provider.VerifyClaims, payloadKey); cp != nil {
 			p = andPrincipals([]*envoy_rbac_v3.Principal{p, cp})
 		}
 		jwtPrincipals = append(jwtPrincipals, p)
@@ -717,17 +718,6 @@ func addJWTPrincipals(p []*envoy_rbac_v3.Principal, infos []*JWTInfo) []*envoy_r
 	return res
 }
 
-// collectTopLevelJWTInfos extracts all the top level jwt infos.
-func collectTopLevelJWTInfos(rbacIxn *rbacIntention) []*JWTInfo {
-	infos := make([]*JWTInfo, 0, len(rbacIxn.jwtInfos))
-
-	if len(rbacIxn.jwtInfos) > 0 {
-		infos = append(infos, rbacIxn.jwtInfos...)
-	}
-
-	return infos
-}
-
 func jwtClaimsToPrincipals(claims []*structs.IntentionJWTClaimVerification, payloadkey string) *envoy_rbac_v3.Principal {
 	ps := make([]*envoy_rbac_v3.Principal, 0)
 
@@ -744,8 +734,8 @@ func jwtClaimsToPrincipals(claims []*structs.IntentionJWTClaimVerification, payl
 	}
 }
 
-// jwtClaimToPrincipal takes in a payloadkey which is the metadata key. This key is generated by using provider name,
-// permission index with a jwt_payload prefix. See buildPayloadInMetadataKey in agent/xds/jwt_authn.go
+// jwtClaimToPrincipal takes in a payloadkey which is the metadata key. This key is generated by using provider name
+// and a jwt_payload prefix. See buildPayloadInMetadataKey in agent/xds/jwt_authn.go
 //
 // This uniquely generated payloadKey is the first segment in the path to validate the JWT claims. The subsequent segments
 // come from the Path included in the IntentionJWTClaimVerification param.

@@ -62,17 +62,14 @@ func makeJWTAuthFilter(pCE map[string]*structs.JWTProviderConfigEntry, intention
 
 	cfg := &envoy_http_jwt_authn_v3.JwtAuthentication{
 		Providers: providers,
-	}
-	// only add rules if any of the existing providers are referenced by intentions
-	if len(jwtRequirements) > 0 {
-		cfg.Rules = []*envoy_http_jwt_authn_v3.RequirementRule{
+		Rules: []*envoy_http_jwt_authn_v3.RequirementRule{
 			{
 				Match: &envoy_route_v3.RouteMatch{
 					PathSpecifier: &envoy_route_v3.RouteMatch_Prefix{Prefix: "/"},
 				},
 				RequirementType: makeJWTRequirementRule(andJWTRequirements(jwtRequirements)),
 			},
-		}
+		},
 	}
 	return makeEnvoyHTTPFilter(jwtEnvoyFilter, cfg)
 }
@@ -87,7 +84,7 @@ func makeJWTRequirementRule(r *envoy_http_jwt_authn_v3.JwtRequirement) *envoy_ht
 func andJWTRequirements(reqs []*envoy_http_jwt_authn_v3.JwtRequirement) *envoy_http_jwt_authn_v3.JwtRequirement {
 	switch len(reqs) {
 	case 0:
-		return anyJWTRequirement()
+		return nil
 	case 1:
 		return reqs[0]
 	default:
@@ -98,12 +95,6 @@ func andJWTRequirements(reqs []*envoy_http_jwt_authn_v3.JwtRequirement) *envoy_h
 				},
 			},
 		}
-	}
-}
-
-func anyJWTRequirement() *envoy_http_jwt_authn_v3.JwtRequirement {
-	return &envoy_http_jwt_authn_v3.JwtRequirement{
-		RequiresType: &envoy_http_jwt_authn_v3.JwtRequirement_RequiresAny{},
 	}
 }
 
