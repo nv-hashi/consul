@@ -44,9 +44,7 @@
                     "authenticated": {
                       "principalName": {
                         "safeRegex": {
-                          "googleRe2": {
-
-                          },
+                          "googleRe2": {},
                           "regex": "^spiffe://test.consul/ns/default/dc/[^/]+/svc/web$"
                         }
                       }
@@ -55,12 +53,16 @@
                   {
                     "orIds": {
                       "ids": [
-                        { 
+                        {
                           "metadata": {
-                            "filter":"envoy.filters.http.jwt_authn",
+                            "filter": "envoy.filters.http.jwt_authn",
                             "path": [
-                              {"key": "jwt_payload_okta"},
-                              {"key": "roles"}
+                              {
+                                "key": "jwt_payload_okta"
+                              },
+                              {
+                                "key": "roles"
+                              }
                             ],
                             "value": {
                               "stringMatch": {
@@ -69,13 +71,19 @@
                             }
                           }
                         },
-                        { 
+                        {
                           "metadata": {
-                            "filter":"envoy.filters.http.jwt_authn",
+                            "filter": "envoy.filters.http.jwt_authn",
                             "path": [
-                              {"key": "jwt_payload_auth0_0"},
-                              {"key": "perms"},
-                              {"key": "role"}
+                              {
+                                "key": "jwt_payload_auth0_0"
+                              },
+                              {
+                                "key": "perms"
+                              },
+                              {
+                                "key": "role"
+                              }
                             ],
                             "value": {
                               "stringMatch": {
@@ -84,13 +92,19 @@
                             }
                           }
                         },
-                        { 
+                        {
                           "metadata": {
-                            "filter":"envoy.filters.http.jwt_authn",
+                            "filter": "envoy.filters.http.jwt_authn",
                             "path": [
-                              {"key": "jwt_payload_auth0_1"},
-                              {"key": "perms"},
-                              {"key": "role"}
+                              {
+                                "key": "jwt_payload_auth0_1"
+                              },
+                              {
+                                "key": "perms"
+                              },
+                              {
+                                "key": "role"
+                              }
                             ],
                             "value": {
                               "stringMatch": {

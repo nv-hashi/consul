@@ -31,12 +31,16 @@
                   {
                     "orIds": {
                       "ids": [
-                        { 
+                        {
                           "metadata": {
-                            "filter":"envoy.filters.http.jwt_authn",
+                            "filter": "envoy.filters.http.jwt_authn",
                             "path": [
-                              {"key": "jwt_payload_okta_0"},
-                              {"key": "roles"}
+                              {
+                                "key": "jwt_payload_okta_0"
+                              },
+                              {
+                                "key": "roles"
+                              }
                             ],
                             "value": {
                               "stringMatch": {
