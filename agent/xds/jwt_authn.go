@@ -35,22 +35,23 @@ func makeJWTAuthFilter(pCE map[string]*structs.JWTProviderConfigEntry, intention
 		if intention.JWT == nil && !hasJWTconfig(intention.Permissions) {
 			continue
 		}
-		for _, jwtReq := range collectJWTRequirements(intention) {
-			if _, ok := providers[jwtReq.Name]; ok {
+		for _, p := range collectJWTProviders(intention) {
+			providerName := p.Name
+			if _, ok := providers[providerName]; ok {
 				continue
 			}
 
-			provider, ok := pCE[jwtReq.Name]
+			providerCE, ok := pCE[providerName]
 			if !ok {
-				return nil, fmt.Errorf("provider specified in intention does not exist. Provider name: %s", jwtReq.Name)
+				return nil, fmt.Errorf("provider specified in intention does not exist. Provider name: %s", providerName)
 			}
 
-			envoyCfg, err := buildJWTProviderConfig(provider)
+			envoyCfg, err := buildJWTProviderConfig(providerCE)
 			if err != nil {
 				return nil, err
 			}
-			providers[provider.Name] = envoyCfg
-			reqs := providerToJWTRequirement(provider)
+			providers[providerName] = envoyCfg
+			reqs := providerToJWTRequirement(providerCE)
 			jwtRequirements = append(jwtRequirements, reqs)
 		}
 	}
@@ -124,12 +125,10 @@ func providerToJWTRequirement(provider *structs.JWTProviderConfigEntry) *envoy_h
 	}
 }
 
-// collectJWTRequirements returns a list of all top level and permission level referenced providers.
-func collectJWTRequirements(i *structs.Intention) []*structs.IntentionJWTProvider {
-	var reqs []*structs.IntentionJWTProvider
-
+// collectJWTProviders returns a list of all top level and permission level referenced providers.
+func collectJWTProviders(i *structs.Intention) []*structs.IntentionJWTProvider {
 	// get permission level providers
-	reqs = append(reqs, getPermissionsProviders(i.Permissions)...)
+	reqs := getPermissionsProviders(i.Permissions)
 
 	if i.JWT != nil {
 		// get top level providers
@@ -139,14 +138,14 @@ func collectJWTRequirements(i *structs.Intention) []*structs.IntentionJWTProvide
 	return reqs
 }
 
-func getPermissionsProviders(p []*structs.IntentionPermission) []*structs.IntentionJWTProvider {
+func getPermissionsProviders(perms []*structs.IntentionPermission) []*structs.IntentionJWTProvider {
 	var reqs []*structs.IntentionJWTProvider
-	for _, perm := range p {
-		if perm.JWT == nil {
+	for _, p := range perms {
+		if p.JWT == nil {
 			continue
 		}
 
-		reqs = append(reqs, perm.JWT.Providers...)
+		reqs = append(reqs, p.JWT.Providers...)
 	}
 
 	return reqs
@@ -159,7 +158,7 @@ func getPermissionsProviders(p []*structs.IntentionPermission) []*structs.Intent
 //
 // eg. With a provider named okta will have a payload key of: jwt_payload_okta
 func buildPayloadInMetadataKey(providerName string) string {
-	return fmt.Sprintf("%s_%s", jwtMetadataKeyPrefix, providerName)
+	return jwtMetadataKeyPrefix + "_" + providerName
 }
 
 func buildJWTProviderConfig(p *structs.JWTProviderConfigEntry) (*envoy_http_jwt_authn_v3.JwtProvider, error) {

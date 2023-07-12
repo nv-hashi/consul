@@ -216,22 +216,12 @@ func removePermissionPrecedence(perms []*rbacPermission, intentionDefaultAction 
 		}
 
 		perm.ComputedPermission = perm.Flatten()
-		//attach jwt permissions to computed permission
-		perm.ComputedPermission = perm.GenerateJWTPermissions()
 		out = append(out, perm)
 	}
 
 	return out
 }
 
-// GenerateJWTPermissions ensure the computed permission is associated with
-// a JWT permission when JWTs validation is required.
-//
-// For each JWTInfo (AKA provider required), this builds 1 single permission that validates that the jwt has
-// the right issuer (`iss`) field and validates the claims (if any).
-//
-// After generating a single permission per info, it combines all the info permissions into a single OrPermission.
-// This orPermission is then attached to initial computed permission for jwt payload and claims validation.
 func (p *rbacPermission) GenerateJWTPermissions() *envoy_rbac_v3.Permission {
 	if len(p.jwtInfos) == 0 {
 		return p.ComputedPermission
@@ -472,17 +462,47 @@ type rbacPermission struct {
 	ComputedPermission *envoy_rbac_v3.Permission
 }
 
+// Flatten ensure the permission rules, not-rules, and jwt validation rules are merged into a single computed permission.
+//
+// Details on JWTInfo section:
+// For each JWTInfo (AKA provider required), this builds 1 single permission that validates that the jwt has
+// the right issuer (`iss`) field and validates the claims (if any).
+//
+// After generating a single permission per info, it combines all the info permissions into a single OrPermission.
+// This orPermission is then attached to initial computed permission for jwt payload and claims validation.
 func (p *rbacPermission) Flatten() *envoy_rbac_v3.Permission {
-	if len(p.NotPerms) == 0 {
-		return p.Perm
+	computedPermission := p.Perm
+	if len(p.NotPerms) == 0 && len(p.jwtInfos) == 0 {
+		return computedPermission
 	}
 
-	parts := make([]*envoy_rbac_v3.Permission, 0, len(p.NotPerms)+1)
-	parts = append(parts, p.Perm)
-	for _, notPerm := range p.NotPerms {
-		parts = append(parts, notPermission(notPerm))
+	if len(p.NotPerms) != 0 {
+		parts := make([]*envoy_rbac_v3.Permission, 0, len(p.NotPerms)+1)
+		parts = append(parts, p.Perm)
+		for _, notPerm := range p.NotPerms {
+			parts = append(parts, notPermission(notPerm))
+		}
+		computedPermission = andPermissions(parts)
 	}
-	return andPermissions(parts)
+
+	if len(p.jwtInfos) == 0 {
+		return computedPermission
+	}
+
+	var jwtPerms []*envoy_rbac_v3.Permission
+	for _, info := range p.jwtInfos {
+		payloadKey := buildPayloadInMetadataKey(info.Provider.Name)
+		claimsPermission := jwtInfosToPermission(info.Provider.VerifyClaims, payloadKey)
+		issuerPermission := segmentToPermission(pathToSegments([]string{"iss"}, payloadKey), info.Issuer)
+
+		perm := andPermissions([]*envoy_rbac_v3.Permission{
+			issuerPermission, claimsPermission,
+		})
+		jwtPerms = append(jwtPerms, perm)
+	}
+
+	jwtPerm := orPermissions(jwtPerms)
+	return andPermissions([]*envoy_rbac_v3.Permission{computedPermission, jwtPerm})
 }
 
 // simplifyNotSourceSlice will collapse NotSources elements together if any element is
@@ -685,11 +705,11 @@ func makeRBACRules(
 //
 // After generating a single principal per info, it combines all the info principals into a single OrPrincipal.
 // This orPrincipal is then attached to each of the RBAC/NETWORK principal for jwt payload validation.
-func addJWTPrincipals(p []*envoy_rbac_v3.Principal, infos []*JWTInfo) []*envoy_rbac_v3.Principal {
+func addJWTPrincipals(principals []*envoy_rbac_v3.Principal, infos []*JWTInfo) []*envoy_rbac_v3.Principal {
 	if len(infos) == 0 {
-		return p
+		return principals
 	}
-	jwtPrincipals := make([]*envoy_rbac_v3.Principal, 0)
+	jwtPrincipals := make([]*envoy_rbac_v3.Principal, 0, len(infos))
 	for _, info := range infos {
 		payloadKey := buildPayloadInMetadataKey(info.Provider.Name)
 
@@ -709,7 +729,7 @@ func addJWTPrincipals(p []*envoy_rbac_v3.Principal, infos []*JWTInfo) []*envoy_r
 
 	// add the big jwt principal to each rbac/network principal
 	res := make([]*envoy_rbac_v3.Principal, 0)
-	for _, principal := range p {
+	for _, principal := range principals {
 		if principal != nil && jwtFinalPrincipal != nil {
 			p := andPrincipals([]*envoy_rbac_v3.Principal{principal, jwtFinalPrincipal})
 			res = append(res, p)
@@ -765,7 +785,7 @@ func segmentToPrincipal(segments []*envoy_matcher_v3.MetadataMatcher_PathSegment
 }
 
 func jwtInfosToPermission(claims []*structs.IntentionJWTClaimVerification, payloadkey string) *envoy_rbac_v3.Permission {
-	ps := make([]*envoy_rbac_v3.Permission, 0)
+	ps := make([]*envoy_rbac_v3.Permission, 0, len(claims))
 
 	for _, claim := range claims {
 		ps = append(ps, jwtClaimToPermission(claim, payloadkey))

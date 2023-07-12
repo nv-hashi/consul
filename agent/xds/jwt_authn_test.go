@@ -205,7 +205,7 @@ func TestMakeJWTAUTHFilters(t *testing.T) {
 	}
 }
 
-func TestCollectJWTRequirements(t *testing.T) {
+func TestCollectJWTProviders(t *testing.T) {
 	tests := map[string]struct {
 		intention *structs.Intention
 		expected  []*structs.IntentionJWTProvider
@@ -243,7 +243,7 @@ func TestCollectJWTRequirements(t *testing.T) {
 	for name, tt := range tests {
 		tt := tt
 		t.Run(name, func(t *testing.T) {
-			reqs := collectJWTRequirements(tt.intention)
+			reqs := collectJWTProviders(tt.intention)
 			require.ElementsMatch(t, reqs, tt.expected)
 		})
 	}
