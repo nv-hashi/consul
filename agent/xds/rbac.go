@@ -28,7 +28,7 @@ func makeRBACNetworkFilter(
 	localInfo rbacLocalInfo,
 	peerTrustBundles []*pbpeering.PeeringTrustBundle,
 ) (*envoy_listener_v3.Filter, error) {
-	rules, err := makeRBACRules(intentions, intentionDefaultAllow, localInfo, false, peerTrustBundles, map[string]*structs.JWTProviderConfigEntry{})
+	rules, err := makeRBACRules(intentions, intentionDefaultAllow, localInfo, false, peerTrustBundles, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -45,9 +45,9 @@ func makeRBACHTTPFilter(
 	intentionDefaultAllow bool,
 	localInfo rbacLocalInfo,
 	peerTrustBundles []*pbpeering.PeeringTrustBundle,
-	pCE map[string]*structs.JWTProviderConfigEntry,
+	providerMap map[string]*structs.JWTProviderConfigEntry,
 ) (*envoy_http_v3.HttpFilter, error) {
-	rules, err := makeRBACRules(intentions, intentionDefaultAllow, localInfo, true, peerTrustBundles, pCE)
+	rules, err := makeRBACRules(intentions, intentionDefaultAllow, localInfo, true, peerTrustBundles, providerMap)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func intentionListToIntermediateRBACForm(
 	localInfo rbacLocalInfo,
 	isHTTP bool,
 	trustBundlesByPeer map[string]*pbpeering.PeeringTrustBundle,
-	pCE map[string]*structs.JWTProviderConfigEntry,
+	providerMap map[string]*structs.JWTProviderConfigEntry,
 ) ([]*rbacIntention, error) {
 	sort.Sort(structs.IntentionPrecedenceSorter(intentions))
 
@@ -81,7 +81,7 @@ func intentionListToIntermediateRBACForm(
 			continue
 		}
 
-		rixn, err := intentionToIntermediateRBACForm(ixn, localInfo, isHTTP, trustBundle, pCE)
+		rixn, err := intentionToIntermediateRBACForm(ixn, localInfo, isHTTP, trustBundle, providerMap)
 		if err != nil {
 			return nil, err
 		}
@@ -249,7 +249,7 @@ func intentionToIntermediateRBACForm(
 	localInfo rbacLocalInfo,
 	isHTTP bool,
 	bundle *pbpeering.PeeringTrustBundle,
-	pCE map[string]*structs.JWTProviderConfigEntry,
+	providerMap map[string]*structs.JWTProviderConfigEntry,
 ) (*rbacIntention, error) {
 	rixn := &rbacIntention{
 		Source: rbacService{
@@ -269,7 +269,7 @@ func intentionToIntermediateRBACForm(
 	if isHTTP && ixn.JWT != nil {
 		var jwts []*JWTInfo
 		for _, prov := range ixn.JWT.Providers {
-			jwtProvider, ok := pCE[prov.Name]
+			jwtProvider, ok := providerMap[prov.Name]
 
 			if !ok {
 				return nil, fmt.Errorf("provider specified in intention does not exist. Provider name: %s", prov.Name)
@@ -294,7 +294,7 @@ func intentionToIntermediateRBACForm(
 				if perm.JWT != nil {
 					var jwts []*JWTInfo
 					for _, prov := range perm.JWT.Providers {
-						jwtProvider, ok := pCE[prov.Name]
+						jwtProvider, ok := providerMap[prov.Name]
 						if !ok {
 							return nil, fmt.Errorf("provider specified in intention does not exist. Provider name: %s", prov.Name)
 						}
@@ -601,7 +601,7 @@ func makeRBACRules(
 	localInfo rbacLocalInfo,
 	isHTTP bool,
 	peerTrustBundles []*pbpeering.PeeringTrustBundle,
-	pCE map[string]*structs.JWTProviderConfigEntry,
+	providerMap map[string]*structs.JWTProviderConfigEntry,
 ) (*envoy_rbac_v3.RBAC, error) {
 	// TODO(banks,rb): Implement revocation list checking?
 
@@ -622,7 +622,7 @@ func makeRBACRules(
 	}
 
 	// First build up just the basic principal matches.
-	rbacIxns, err := intentionListToIntermediateRBACForm(intentions, localInfo, isHTTP, trustBundlesByPeer, pCE)
+	rbacIxns, err := intentionListToIntermediateRBACForm(intentions, localInfo, isHTTP, trustBundlesByPeer, providerMap)
 	if err != nil {
 		return nil, err
 	}

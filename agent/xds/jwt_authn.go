@@ -27,7 +27,7 @@ const (
 //
 // Eg. If you have three providers: okta, auth0 and fusionAuth and only okta is referenced in your intentions, then this
 // will create a jwt-auth filter containing just okta in the list of providers.
-func makeJWTAuthFilter(pCE map[string]*structs.JWTProviderConfigEntry, intentions structs.SimplifiedIntentions) (*envoy_http_v3.HttpFilter, error) {
+func makeJWTAuthFilter(providerMap map[string]*structs.JWTProviderConfigEntry, intentions structs.SimplifiedIntentions) (*envoy_http_v3.HttpFilter, error) {
 	providers := map[string]*envoy_http_jwt_authn_v3.JwtProvider{}
 	var jwtRequirements []*envoy_http_jwt_authn_v3.JwtRequirement
 
@@ -41,7 +41,7 @@ func makeJWTAuthFilter(pCE map[string]*structs.JWTProviderConfigEntry, intention
 				continue
 			}
 
-			providerCE, ok := pCE[providerName]
+			providerCE, ok := providerMap[providerName]
 			if !ok {
 				return nil, fmt.Errorf("provider specified in intention does not exist. Provider name: %s", providerName)
 			}
@@ -56,8 +56,8 @@ func makeJWTAuthFilter(pCE map[string]*structs.JWTProviderConfigEntry, intention
 		}
 	}
 
-	if len(intentions) == 0 && len(providers) == 0 {
-		//do not add jwt_authn filter when intentions don't have JWT
+	if len(jwtRequirements) == 0 {
+		//do not add jwt_authn filter when intentions don't have JWTs
 		return nil, nil
 	}
 

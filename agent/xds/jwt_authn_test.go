@@ -172,6 +172,10 @@ func TestMakeJWTAUTHFilters(t *testing.T) {
 		intentions structs.SimplifiedIntentions
 		provider   map[string]*structs.JWTProviderConfigEntry
 	}{
+		"no-provider": {
+			intentions: simplified(makeTestIntention(t, ixnOpts{src: "web", action: structs.IntentionActionAllow})),
+			provider:   nil,
+		},
 		"remote-provider": {
 			intentions: simplified(makeTestIntention(t, ixnOpts{src: "web", action: structs.IntentionActionAllow, jwt: oktaIntention})),
 			provider:   remoteCE,
